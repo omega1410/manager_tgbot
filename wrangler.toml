@@ -1,0 +1,8 @@
+name = "tg-business-bot"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Переменные, которые не являются секретами (ID владельца)
+[vars]
+OWNER_ID = "5669245603" # Замените на ваш реальный Telegram ID
