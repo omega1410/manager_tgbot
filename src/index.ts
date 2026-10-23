@@ -36,6 +36,7 @@ function getBot(env: Env): Bot {
   bot.command("away", async (ctx: Context) => {
     if (ctx.from?.id !== cachedOwnerId) return;
     isAway = !isAway;
+    console.log("AWAY toggled: isAway =", isAway);
     await ctx.reply(
       isAway ? "🤖 Я в сети и буду отвечать за тебя." : "🏠 Ты снова в сети. Я замолкаю."
     );
@@ -50,9 +51,27 @@ function getBot(env: Env): Bot {
   // --- Business сообщения (автоответчик) ---
   bot.on("business_message:text", async (ctx: Context) => {
     const msg = ctx.businessMessage;
-    if (!msg || !msg.text) return;
-    if (msg.from.id === cachedOwnerId) return; // Игнорируем владельца
-    if (!isAway) return; // Режим выключен
+
+    // Отладка: видно, дошло ли сообщение и какое условие сработает
+    console.log(
+      "BUSINESS HIT: from =", msg?.from?.id,
+      "| owner =", cachedOwnerId,
+      "| isAway =", isAway,
+      "| text =", msg?.text?.slice(0, 40)
+    );
+
+    if (!msg || !msg.text) {
+      console.log("SKIP: no msg/text");
+      return;
+    }
+    if (msg.from.id === cachedOwnerId) {
+      console.log("SKIP: message from owner");
+      return;
+    }
+    if (!isAway) {
+      console.log("SKIP: isAway is false (state lost or not toggled)");
+      return;
+    }
 
     const userId = msg.from.id;
     const chatId = msg.chat.id;
@@ -70,11 +89,12 @@ function getBot(env: Env): Bot {
         business_connection_id: businessConnectionId,
       });
     } catch (e) {
-      // Не критично: если действие не отправилось, продолжаем отвечать
       console.error("sendChatAction failed:", e);
     }
 
     try {
+      console.log("AI REQUEST: model =", env.AI_MODEL, "| url =", `${env.AI_BASE_URL}/chat/completions`);
+
       const response = await fetch(`${env.AI_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -89,9 +109,11 @@ function getBot(env: Env): Bot {
         }),
       });
 
+      console.log("AI RESPONSE: status =", response.status);
+
       if (!response.ok) {
         const errText = await response.text();
-        console.error("AI API Error:", errText);
+        console.error("AI API Error:", response.status, errText);
         throw new Error("AI request failed");
       }
 
@@ -100,6 +122,7 @@ function getBot(env: Env): Bot {
 
       conversationHistory[userId].push({ role: "assistant", content: aiAnswer });
       await ctx.reply(aiAnswer);
+      console.log("AI REPLY SENT, length =", aiAnswer.length);
     } catch (e) {
       console.error("Ошибка при ответе:", e);
       await ctx.reply(
