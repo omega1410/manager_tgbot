@@ -30,13 +30,10 @@ function getBot(env: Env): Bot {
   if (bot) return bot;
 
   cachedOwnerId = parseInt(env.OWNER_ID, 10);
-  console.log("INIT BOT: ownerId =", cachedOwnerId);
-
   bot = new Bot(env.BOT_TOKEN);
 
   // --- Команды ---
   bot.command("away", async (ctx: Context) => {
-    console.log("AWAY handler hit: from.id =", ctx.from?.id, "ownerId =", cachedOwnerId);
     if (ctx.from?.id !== cachedOwnerId) return;
     isAway = !isAway;
     await ctx.reply(
@@ -45,7 +42,6 @@ function getBot(env: Env): Bot {
   });
 
   bot.command("reset", async (ctx: Context) => {
-    console.log("RESET handler hit: from.id =", ctx.from?.id);
     if (ctx.from?.id !== cachedOwnerId) return;
     for (const key in conversationHistory) delete conversationHistory[key];
     await ctx.reply("🧹 История всех диалогов сброшена.");
@@ -60,6 +56,7 @@ function getBot(env: Env): Bot {
 
     const userId = msg.from.id;
     const chatId = msg.chat.id;
+    const businessConnectionId = msg.business_connection_id;
 
     if (!conversationHistory[userId]) {
       conversationHistory[userId] = [{ role: "system", content: SYSTEM_PROMPT }];
@@ -67,7 +64,15 @@ function getBot(env: Env): Bot {
 
     conversationHistory[userId].push({ role: "user", content: msg.text });
 
-    await ctx.api.sendChatAction(chatId, "typing");
+    // Показываем "печатает..." — в business-чате нужен business_connection_id
+    try {
+      await ctx.api.sendChatAction(chatId, "typing", {
+        business_connection_id: businessConnectionId,
+      });
+    } catch (e) {
+      // Не критично: если действие не отправилось, продолжаем отвечать
+      console.error("sendChatAction failed:", e);
+    }
 
     try {
       const response = await fetch(`${env.AI_BASE_URL}/chat/completions`, {
@@ -103,25 +108,18 @@ function getBot(env: Env): Bot {
     }
   });
 
-  // Ловим любые сообщения для отладки (можно убрать после проверки)
-  bot.on("message", async (ctx: Context) => {
-    console.log("ANY message:", ctx.message?.text, "chat.type =", ctx.chat?.type);
-  });
-
   return bot;
 }
 
 function getHandler(env: Env) {
   if (handler) return handler;
   const b = getBot(env);
-  // "cloudflare-mod" — адаптер для формата ES Modules (export default { fetch })
   handler = webhookCallback(b, "cloudflare-mod");
   return handler;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // GET (например, открытие в браузере) не должен падать в JSON.parse
     if (request.method !== "POST") {
       return new Response("Bot is running.", { status: 200 });
     }
